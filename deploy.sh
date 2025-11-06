@@ -37,9 +37,20 @@ if ! command -v docker &> /dev/null; then
     # Add current user to docker group
     sudo usermod -aG docker $USER
     echo "✅ Docker installed successfully"
+    echo "⚠️  You need to log out and log back in for group changes to take effect"
+    echo "   Or run: newgrp docker"
 else
     echo "✅ Docker is already installed"
+    if ! groups $USER | grep -q docker; then
+        sudo usermod -aG docker $USER
+        echo "⚠️  Added $USER to docker group. Please run: newgrp docker"
+    fi
 fi
+
+echo "🔧 Applying docker group permissions..."
+newgrp docker << DOCKERGROUP
+echo "✅ Docker permissions applied"
+DOCKERGROUP
 
 # Verify Docker Compose
 if ! docker compose version &> /dev/null; then
@@ -149,8 +160,8 @@ services:
       - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
       - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
       - EXECUTIONS_MODE=${EXECUTIONS_MODE:-regular}
-      - QUEUE_BULL_REDIS_HOST=${QUEUE_BULL_REDIS_HOST}
-      - QUEUE_BULL_REDIS_PORT=${QUEUE_BULL_REDIS_PORT}
+      - QUEUE_BULL_REDIS_HOST=${QUEUE_BULL_REDIS_HOST:-}
+      - QUEUE_BULL_REDIS_PORT=${QUEUE_BULL_REDIS_PORT:-}
     volumes:
       - n8n-data:/home/node/.n8n
     depends_on:
@@ -207,8 +218,16 @@ if command -v ufw &> /dev/null; then
 fi
 
 # Start services
+if ! groups | grep -q docker; then
+    echo "⚠️  Docker group not yet active in current session"
+    echo "   Running with sudo this time..."
+    DOCKER_CMD="sudo docker"
+else
+    DOCKER_CMD="docker"
+fi
+
 echo "🚀 Starting n8n services..."
-docker compose up -d
+$DOCKER_CMD compose up -d
 
 # Wait for services to be ready
 echo "⏳ Waiting for services to start (30 seconds)..."
@@ -221,7 +240,7 @@ echo "✅ Deployment Complete!"
 echo "=================================="
 echo ""
 echo "📊 Service Status:"
-docker compose ps
+$DOCKER_CMD compose ps
 echo ""
 echo "🔐 Your Credentials:"
 echo "   Username: admin"
