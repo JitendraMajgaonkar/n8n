@@ -101,11 +101,31 @@ DB_POSTGRESDB_PASSWORD=$POSTGRES_PASSWORD
 EOF
 
 # Create docker-compose.yml
-echo "📝 Creating docker-compose.yml..."
+echo "📝 Creating docker-compose.yml with Nginx Proxy Manager..."
 cat > docker-compose.yml << 'EOF'
 version: '3.8'
 
 services:
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"      # HTTP
+      - "443:443"    # HTTPS
+      - "81:81"      # Admin UI
+    environment:
+      - DISABLE_IPV6=true
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
   postgres:
     image: postgres:16-alpine
     container_name: n8n-postgres
@@ -145,6 +165,8 @@ services:
     restart: unless-stopped
     ports:
       - "5678:5678"
+    expose:
+      - "5678"
     environment:
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
@@ -173,6 +195,8 @@ services:
       - n8n-network
 
 volumes:
+  npm-data:
+  npm-letsencrypt:
   postgres-data:
   redis-data:
   n8n-data:
@@ -212,9 +236,19 @@ chmod +x backup.sh
 # Configure firewall
 echo "🔥 Configuring firewall..."
 if command -v ufw &> /dev/null; then
-    sudo ufw allow 5678/tcp
+    echo "Opening required ports..."
+    sudo ufw allow 22/tcp comment 'SSH'
+    sudo ufw allow 80/tcp comment 'HTTP'
+    sudo ufw allow 443/tcp comment 'HTTPS'
+    sudo ufw allow 81/tcp comment 'NPM Admin'
+    sudo ufw allow 8080/tcp comment 'Additional Port'
+    sudo ufw allow 5678/tcp comment 'n8n'
+    sudo ufw allow from 127.0.0.0/8
+    sudo ufw allow from ::1
+    sudo ufw allow from 172.16.0.0/12
     sudo ufw --force enable
-    echo "✅ Firewall configured (port 5678 opened)"
+    echo "✅ Firewall configured with all required ports"
+    echo "   Ports opened: 22 (SSH), 80 (HTTP), 443 (HTTPS), 8080 (NPM Admin), 5678 (n8n)"
 fi
 
 # Start services
@@ -242,12 +276,17 @@ echo ""
 echo "📊 Service Status:"
 $DOCKER_CMD compose ps
 echo ""
-echo "🔐 Your Credentials:"
+echo "🔐 n8n Credentials:"
 echo "   Username: admin"
 echo "   Password: $N8N_USER_PASSWORD"
 echo ""
 echo "🌐 Access n8n at:"
-echo "   http://$(curl -s ifconfig.me):5678"
+echo "   Direct: http://$(curl -s ifconfig.me):5678"
+echo ""
+echo "🔒 Nginx Proxy Manager:"
+echo "   Admin UI: http://$(curl -s ifconfig.me):81"
+echo "   Default Login: admin@example.com / changeme"
+echo "   ⚠️  IMPORTANT: Change password on first login!"
 echo ""
 echo "💾 IMPORTANT - Save these credentials:"
 echo "   PostgreSQL Password: $POSTGRES_PASSWORD"
@@ -263,5 +302,18 @@ echo "   Restart: cd ~/n8n && docker compose restart"
 echo "   Stop: cd ~/n8n && docker compose down"
 echo "   Backup: cd ~/n8n && ./backup.sh"
 echo ""
-echo "⚠️  IMPORTANT: Open port 5678 in Azure NSG!"
+echo "⚠️  IMPORTANT: Open these ports in Azure NSG:"
+echo "   - Port 22 (SSH)"
+echo "   - Port 80 (HTTP)"
+echo "   - Port 443 (HTTPS)"
+echo "   - Port 81 (NPM Admin)"
+echo "   - Port 8080 (Additional Port)"
+echo "   - Port 5678 (n8n Direct Access)"
+echo ""
+echo "📖 Next Steps:"
+echo "   1. Access NPM at http://YOUR_IP:8080"
+echo "   2. Change default password"
+echo "   3. Configure DNS A record for your domain"
+echo "   4. Create proxy host in NPM for n8n"
+echo "   5. Request Let's Encrypt SSL certificate"
 echo "=================================="
